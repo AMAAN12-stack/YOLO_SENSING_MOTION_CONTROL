@@ -5,114 +5,119 @@ import time
 from picamera2 import Picamera2
 import RPi.GPIO as GPIO
 
-# -----------------------------
-# Load YOLOv5 model
-# -----------------------------
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=False)
-
-# -----------------------------
-# Initialize Pi Camera
-# -----------------------------
-picam2 = Picamera2()
-picam2.configure(picam2.preview_configuration(main={"size": (640, 480)}))
-picam2.start()
-
-frame = None
-running = True
-
-# -----------------------------
-# Camera thread (fast capture)
-# -----------------------------
-def camera_thread():
-    global frame, running
-    while running:
-        frame = picam2.capture_array()
-        time.sleep(0.001)
-
-threading.Thread(target=camera_thread, daemon=True).start()
-
-# -----------------------------
-# Servo setup
-# -----------------------------
+# -------------------------------
+# SERVO SETUP (PAN = 18, TILT = 19)
+# -------------------------------
 GPIO.setmode(GPIO.BCM)
+GPIO.setup(18, GPIO.OUT)  # Pan
+GPIO.setup(19, GPIO.OUT)  # Tilt
 
-PAN_PIN = 18
-TILT_PIN = 19
+pan = GPIO.PWM(18, 50)   # 50Hz
+tilt = GPIO.PWM(19, 50)
 
-GPIO.setup(PAN_PIN, GPIO.OUT)
-GPIO.setup(TILT_PIN, GPIO.OUT)
+pan.start(7.5)   # center
+tilt.start(7.5)  # center
 
-pan_servo = GPIO.PWM(PAN_PIN, 50)
-tilt_servo = GPIO.PWM(TILT_PIN, 50)
-
-pan_servo.start(7.5)   # Center
-tilt_servo.start(7.5)
+def set_servo(pwm, angle):
+    duty = 2 + (angle / 18)   # convert angle° → duty cycle
+    pwm.ChangeDutyCycle(duty)
 
 pan_angle = 90
 tilt_angle = 90
 
-def angle_to_duty(angle):
-    return 2.5 + (angle / 18.0)
+# -------------------------------
+# YOLO MODEL
+# -------------------------------
+model = torch.hub.load("ultralytics/yolov5", "yolov5n", pretrained=True)
+TARGET_CLASS = "cell phone"
 
-# -----------------------------
-# Object tracking loop
-# -----------------------------
-FRAME_W = 640
-FRAME_H = 480
-center_x_target = FRAME_W // 2
-center_y_target = FRAME_H // 2
+# -------------------------------
+# CAMERA SETUP
+# -------------------------------
+picam2 = Picamera2()
+config = picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)})
+picam2.configure(config)
+picam2.start()
 
-while True:
-    if frame is None:
-        continue
+frame_lock = threading.Lock()
+latest_frame = None
 
-    results = model(frame)
-    detections = results.xyxy[0]  # bounding boxes
+def capture_frames():
+    global latest_frame
+    while True:
+        frame = picam2.capture_array()
+        with frame_lock:
+            latest_frame = frame
 
-    if len(detections) > 0:
-        # Pick the largest detected object (phone)
-        det = max(detections, key=lambda x: (x[2]-x[0]) * (x[3]-x[1]))
+threading.Thread(target=capture_frames, daemon=True).start()
 
-        x1, y1, x2, y2, conf, cls = det
+# -------------------------------
+# MAIN TRACKING LOOP
+# -------------------------------
+def main():
+    global latest_frame, pan_angle, tilt_angle
 
-        # Calculate object center
-        obj_x = int((x1 + x2) / 2)
-        obj_y = int((y1 + y2) / 2)
+    frame_w, frame_h = 640, 480
 
-        # -----------------------------
-        # PAN (left-right)
-        # -----------------------------
-        if obj_x < center_x_target - 30:
-            pan_angle += 1
-        elif obj_x > center_x_target + 30:
-            pan_angle -= 1
+    while True:
+        if latest_frame is None:
+            continue
 
-        pan_angle = max(0, min(180, pan_angle))
-        pan_servo.ChangeDutyCycle(angle_to_duty(pan_angle))
+        with frame_lock:
+            frame = latest_frame.copy()
 
-        # -----------------------------
-        # TILT (up-down)
-        # -----------------------------
-        if obj_y < center_y_target - 30:
-            tilt_angle -= 1
-        elif obj_y > center_y_target + 30:
-            tilt_angle += 1
+        results = model(frame)
 
-        tilt_angle = max(0, min(180, tilt_angle))
-        tilt_servo.ChangeDutyCycle(angle_to_duty(tilt_angle))
+        phone_detected = False
 
-        annotated = results.render()[0]
-    else:
-        annotated = frame
+        for *xyxy, conf, cls in results.xyxy[0]:
+            label = model.names[int(cls)]
 
-    cv2.imshow("YOLOv5 Tracking", annotated)
+            if label == TARGET_CLASS:
+                phone_detected = True
+                x1, y1, x2, y2 = map(int, xyxy)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        running = False
-        break
+                # Draw box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, label, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-cv2.destroyAllWindows()
-picam2.stop()
-pan_servo.stop()
-tilt_servo.stop()
-GPIO.cleanup()
+                # ----------------------
+                # CENTER OF PHONE
+                # ----------------------
+                phone_x = (x1 + x2) // 2
+                phone_y = (y1 + y2) // 2
+
+                # SCREEN CENTER
+                center_x = frame_w // 2
+                center_y = frame_h // 2
+
+                # ----------------------
+                # SERVO CONTROL
+                # ----------------------
+                error_x = phone_x - center_x
+                error_y = phone_y - center_y
+
+                # Adjust angles (gain factor 0.03)
+                pan_angle -= error_x * 0.03
+                tilt_angle += error_y * 0.03
+
+                # Limit angles to servo range
+                pan_angle = max(0, min(180, pan_angle))
+                tilt_angle = max(0, min(180, tilt_angle))
+
+                # Move servos
+                set_servo(pan, pan_angle)
+                set_servo(tilt, tilt_angle)
+
+        cv2.imshow("Phone Tracking Camera", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    pan.stop()
+    tilt.stop()
+    GPIO.cleanup()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
