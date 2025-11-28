@@ -2,6 +2,7 @@ import RPi.GPIO as GPIO
 import time
 from pynput import keyboard
 
+# Servo pin numbers (BCM)
 PAN_PIN = 18
 TILT_PIN = 19
 
@@ -9,20 +10,23 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(PAN_PIN, GPIO.OUT)
 GPIO.setup(TILT_PIN, GPIO.OUT)
 
-pan = GPIO.PWM(PAN_PIN, 50)
-tilt = GPIO.PWM(TILT_PIN, 50)
+pan_pwm = GPIO.PWM(PAN_PIN, 50)
+tilt_pwm = GPIO.PWM(TILT_PIN, 50)
 
-pan.start(0)
-tilt.start(0)
+pan_pwm.start(0)
+tilt_pwm.start(0)
 
-# Starting angles
+# Start angles
 pan_angle = 90
 tilt_angle = 90
 
+# Track which keys are currently held
+keys_held = set()
+
+# Arduino-like servo.write(angle)
 def move_servo(pwm, angle):
-    if angle < 0: angle = 0
-    if angle > 180: angle = 180
-    duty = 2.5 + (angle / 180.0) * 10
+    angle = max(0, min(180, angle))
+    duty = 2.5 + (angle / 180.0) * 10.0
     pwm.ChangeDutyCycle(duty)
     time.sleep(0.02)
     pwm.ChangeDutyCycle(0)  # reduce jitter
@@ -31,39 +35,52 @@ def move_servo(pwm, angle):
 def on_press(key):
     global pan_angle, tilt_angle
 
+    if key in keys_held:
+        return  # ignore repeated events!
+
+    keys_held.add(key)
+
     try:
         if key == keyboard.Key.left:
             pan_angle -= 5
-            pan_angle = move_servo(pan, pan_angle)
+            pan_angle = move_servo(pan_pwm, pan_angle)
+            print("Pan:", pan_angle)
 
-        elif key == keyboard.Key.right:
+        if key == keyboard.Key.right:
             pan_angle += 5
-            pan_angle = move_servo(pan, pan_angle)
+            pan_angle = move_servo(pan_pwm, pan_angle)
+            print("Pan:", pan_angle)
 
-        elif key == keyboard.Key.up:
+        if key == keyboard.Key.up:
             tilt_angle += 5
-            tilt_angle = move_servo(tilt, tilt_angle)
+            tilt_angle = move_servo(tilt_pwm, tilt_angle)
+            print("Tilt:", tilt_angle)
 
-        elif key == keyboard.Key.down:
+        if key == keyboard.Key.down:
             tilt_angle -= 5
-            tilt_angle = move_servo(tilt, tilt_angle)
+            tilt_angle = move_servo(tilt_pwm, tilt_angle)
+            print("Tilt:", tilt_angle)
 
-        elif key.char == 'q':
-            print("Quitting...")
-            return False  # stop listener
+        if hasattr(key, "char") and key.char == 'q':
+            print("Quit.")
+            return False
 
-    except AttributeError:
-        pass  # ignore unknown keys
+    except:
+        pass
+
+def on_release(key):
+    if key in keys_held:
+        keys_held.remove(key)
 
 def main():
-    print("Use arrow keys to control pan/tilt")
+    print("Use arrow keys to move servos ONE step per press.")
     print("Press 'q' to quit.\n")
 
-    with keyboard.Listener(on_press=on_press) as listener:
+    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
         listener.join()
 
-    pan.stop()
-    tilt.stop()
+    pan_pwm.stop()
+    tilt_pwm.stop()
     GPIO.cleanup()
 
 if __name__ == "__main__":
