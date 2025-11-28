@@ -4,51 +4,56 @@ import torch
 import time
 from picamera2 import Picamera2
 
-# -----------------------------
-# Load YOLOv5 model
-# -----------------------------
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=False)
+# Load YOLO model (you must have yolov8n.pt downloaded)
+model = torch.hub.load("ultralytics/yolov5", "yolov5n", pretrained=True)
+TARGET_CLASS = "cell phone"
 
-# -----------------------------
-# Initialize Pi camera
-# -----------------------------
+# Setup PiCamera2
 picam2 = Picamera2()
-picam2.configure(picam2.preview_configuration(main={"size": (640, 480)}))
+config = picam2.create_preview_configuration(main={"format": "RGB888", "size": (640, 480)})
+picam2.configure(config)
 picam2.start()
 
-# Frame variable shared with thread
-frame = None
-running = True
+frame_lock = threading.Lock()
+latest_frame = None
 
-# -----------------------------
-# Camera thread (faster capture)
-# -----------------------------
-def camera_thread():
-    global frame, running
-    while running:
+def capture_frames():
+    global latest_frame
+    while True:
         frame = picam2.capture_array()
-        time.sleep(0.001)
+        with frame_lock:
+            latest_frame = frame
 
-threading.Thread(target=camera_thread, daemon=True).start()
+# Start capture thread
+threading.Thread(target=capture_frames, daemon=True).start()
 
-# -----------------------------
-# YOLOv5 detection loop
-# -----------------------------
-while True:
-    if frame is None:
-        continue
+def main():
+    global latest_frame
+    while True:
+        if latest_frame is None:
+            continue
 
-    # Run detection
-    results = model(frame)
-    annotated = results.render()[0]
+        with frame_lock:
+            frame = latest_frame.copy()
 
-    # Show output
-    cv2.imshow("YOLOv5 - PiCamera2 Live Detection", annotated)
+        # Run YOLO model
+        results = model(frame)
 
-    # Quit on 'q'
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        running = False
-        break
+        # Filter only "cell phone"
+        for *xyxy, conf, cls in results.xyxy[0]:
+            label = model.names[int(cls)]
+            if label == TARGET_CLASS:
+                x1, y1, x2, y2 = map(int, xyxy)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, label, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-cv2.destroyAllWindows()
-picam2.stop()
+        cv2.imshow("Phone Detection (YOLO + Picamera2)", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
