@@ -1,0 +1,5 @@
+sudo apt update
+sudo apt install python3-opencv python3-pip -y
+pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
+pip3 install picamera2
+pip3 install yolov5
