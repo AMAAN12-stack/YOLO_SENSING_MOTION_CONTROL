@@ -1,5 +1,6 @@
 import RPi.GPIO as GPIO
 import time
+from pynput import keyboard
 
 PAN_PIN = 18
 TILT_PIN = 19
@@ -8,34 +9,62 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(PAN_PIN, GPIO.OUT)
 GPIO.setup(TILT_PIN, GPIO.OUT)
 
-# 50 Hz PWM for servos
 pan = GPIO.PWM(PAN_PIN, 50)
 tilt = GPIO.PWM(TILT_PIN, 50)
 
 pan.start(0)
 tilt.start(0)
 
-# This range (2.5–12.5) works for most servos and reduces jitter
-def set_angle(pwm, angle):
-    duty = 2.5 + (angle / 180.0) * 10.0  # 2.5% → 0°, 12.5% → 180°
+# Starting angles
+pan_angle = 90
+tilt_angle = 90
+
+def move_servo(pwm, angle):
+    if angle < 0: angle = 0
+    if angle > 180: angle = 180
+    duty = 2.5 + (angle / 180.0) * 10
     pwm.ChangeDutyCycle(duty)
-    time.sleep(0.02)  # small delay helps stabilize movement
-    pwm.ChangeDutyCycle(0)  # stop sending PWM to reduce shiver
+    time.sleep(0.02)
+    pwm.ChangeDutyCycle(0)  # reduce jitter
+    return angle
 
-try:
-    # Example: sweep motion
-    while True:
-        for angle in range(0, 181, 5):
-            set_angle(pan, angle)
-            set_angle(tilt, 180 - angle)
+def on_press(key):
+    global pan_angle, tilt_angle
 
-        for angle in range(180, -1, -5):
-            set_angle(pan, angle)
-            set_angle(tilt, 180 - angle)
+    try:
+        if key == keyboard.Key.left:
+            pan_angle -= 5
+            pan_angle = move_servo(pan, pan_angle)
 
-except KeyboardInterrupt:
-    pass
+        elif key == keyboard.Key.right:
+            pan_angle += 5
+            pan_angle = move_servo(pan, pan_angle)
 
-pan.stop()
-tilt.stop()
-GPIO.cleanup()
+        elif key == keyboard.Key.up:
+            tilt_angle += 5
+            tilt_angle = move_servo(tilt, tilt_angle)
+
+        elif key == keyboard.Key.down:
+            tilt_angle -= 5
+            tilt_angle = move_servo(tilt, tilt_angle)
+
+        elif key.char == 'q':
+            print("Quitting...")
+            return False  # stop listener
+
+    except AttributeError:
+        pass  # ignore unknown keys
+
+def main():
+    print("Use arrow keys to control pan/tilt")
+    print("Press 'q' to quit.\n")
+
+    with keyboard.Listener(on_press=on_press) as listener:
+        listener.join()
+
+    pan.stop()
+    tilt.stop()
+    GPIO.cleanup()
+
+if __name__ == "__main__":
+    main()
