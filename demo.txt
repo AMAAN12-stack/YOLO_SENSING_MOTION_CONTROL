@@ -1,2 +1,16 @@
-wget https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-ubuntu.zip
-unzip ncnn-*.zip
+wget https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-ubuntu-2204-arm64.tar.gz
+
+tar -xvf ncnn-20240102-ubuntu-2204-arm64.tar.gz
+
+wget https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-ubuntu-2204-armhf.tar.gz
+
+tar -xvf ncnn-20240102-ubuntu-2204-armhf.tar.gz
+
+conversion
+
+./onnx2ncnn yolov5n.onnx yolov5n.param yolov5n.bin
+
+
+optimize 
+
+./ncnnoptimize yolov5n.param yolov5n.bin yolov5n-opt.param yolov5n-opt.bin 65536
