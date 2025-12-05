@@ -1,0 +1,2 @@
+wget https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-ubuntu.zip
+unzip ncnn-*.zip
