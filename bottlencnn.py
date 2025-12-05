@@ -36,7 +36,7 @@ set_servo(TILT_PIN, tilt_angle)
 # This creates:  ./yolov5n_ncnn_model/
 
 print("Loading NCNN YOLO model...")
-model = YOLO("./yolov5n_ncnn_model")   # loads NCNN param/bin automatically
+model = YOLO("yolov5/yolo11n_ncnn_model")   # loads NCNN param/bin automatically
 print("Model loaded!")
 
 TARGET_CLASS_ID = 39  # bottle in COCO
