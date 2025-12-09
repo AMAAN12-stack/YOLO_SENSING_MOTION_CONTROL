@@ -4,9 +4,6 @@ import pigpio
 from picamera2 import Picamera2
 from ultralytics import YOLO
 
-# -------------------------------
-# SERVO SETUP
-# -------------------------------
 pi = pigpio.pi()
 if not pi.connected:
     print("Unable to connect to pigpio daemon")
@@ -15,7 +12,7 @@ if not pi.connected:
 PAN_PIN = 18
 TILT_PIN = 19
 
-# Start pointed roughly centre
+
 pan_angle = 90.0
 tilt_angle = 131.0
 
@@ -28,24 +25,16 @@ def set_servo(pin, angle):
 set_servo(PAN_PIN, pan_angle)
 set_servo(TILT_PIN, tilt_angle)
 
-# -------------------------------
-# LOAD NCNN MODEL
-# -------------------------------
-# You must first run (offline, once):
-#   model = YOLO("yolov5n.pt")
-#   model.export(format="ncnn")
-# This creates ./yolov5n_ncnn_model/
+
 print("Loading NCNN YOLO model...")
-model = YOLO("/home/yolo/yolo/yolov5/yolov5nu_ncnn_model")
+model = YOLO("/home/yolo/yolo/yolo11n_ncnn_model")
 print("Model loaded!")
 
 TARGET_CLASS_ID = 39  # bottle in COCO
 
-# -------------------------------
-# CAMERA SETUP
-# -------------------------------
-FRAME_W = 320
-FRAME_H = 240
+
+FRAME_W = 640
+FRAME_H =  480
 
 picam2 = Picamera2()
 config = picam2.create_video_configuration(
